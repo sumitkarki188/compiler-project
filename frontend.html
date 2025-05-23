@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Static Code Analyzer</title>
+  <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs/loader.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #fff;
+      color: #222;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    body.dark-mode {
+      background-color: #1e1e1e;
+      color: #ddd;
+    }
+
+    h2 {
+      margin-bottom: 10px;
+    }
+
+    label {
+      font-weight: bold;
+      user-select: none;
+    }
+
+    #controls {
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+
+    select, button, input[type="file"] {
+      padding: 8px 12px;
+      font-size: 1rem;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #0078d4;
+      color: white;
+      border-color: #005ea3;
+    }
+    body.dark-mode select, body.dark-mode button, body.dark-mode input[type="file"] {
+      background-color: #333;
+      color: #ddd;
+      border-color: #555;
+    }
+    body.dark-mode button:hover {
+      background-color: #005ea3;
+      color: #fff;
+    }
+
+    #editor {
+      height: 60vh;
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      font-family: monospace;
+      margin-bottom: 10px;
+    }
+
+    #output {
+      white-space: pre-wrap;
+      background: #f4f4f4;
+      padding: 1em;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+      min-height: 150px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      overflow-y: auto;
+      max-height: 300px;
+      color: #222;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    body.dark-mode #output {
+      background: #333;
+      color: #eee;
+      border-color: #555;
+    }
+
+    .issue-error {
+      color: #e06c75;
+      font-weight: bold;
+    }
+    .issue-warning {
+      color: #d19a66;
+      font-weight: bold;
+    }
+    .issue-info {
+      color: #61afef;
+      font-weight: bold;
+    }
+
+    #score {
+      font-weight: bold;
+      font-size: 1.2rem;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Static Code Analyzer</h2>
+  <div id="controls">
+    <label><input type="checkbox" id="darkToggle"> Dark Mode</label>
+    <select id="language" aria-label="Select programming language">
+      <option value="python">Python</option>
+      <option value="c">C</option>
+      <option value="cpp">C++</option>
+      <option value="java">Java</option>
+    </select>
+    <input type="file" id="fileInput" />
+    <button onclick="analyzeCode()">Analyze</button>
+  </div>
+  <div id="editor"></div>
+  <div id="score"></div>
+  <div id="output" aria-live="polite" aria-atomic="true"></div>
+
+  <script>
+    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.34.1/min/vs' } });
+    require(["vs/editor/editor.main"], function () {
+      window.editor = monaco.editor.create(document.getElementById("editor"), {
+        value: "# Write your code here",
+        language: "python",
+        theme: "vs-dark",
+        fontFamily: "monospace",
+        fontSize: 14,
+        automaticLayout: true,
+      });
+    });
+
+    function analyzeCode() {
+      const language = document.getElementById("language").value;
+      const fileInput = document.getElementById("fileInput");
+      const file = fileInput.files[0];
+
+      const analyze = (code) => {
+        document.getElementById("output").innerHTML = "Analyzing...";
+        document.getElementById("score").innerText = "";
+
+        axios.post("http://127.0.0.1:5000/analyze", { code, language })
+          .then(res => {
+            const issues = res.data.issues || [];
+            const score = res.data.score ?? null;
+
+            let scoreText = score !== null ? `Score: ${score.toFixed(0)} / 100` : "";
+            document.getElementById("score").innerText = scoreText;
+
+            if (issues.length === 0) {
+              document.getElementById("output").innerText = "No issues found!";
+              return;
+            }
+
+            const outputHTML = issues.map(issue => {
+              let severityClass = "issue-info";
+              const type = (issue.type || "").toLowerCase();
+              if (type === "error") severityClass = "issue-error";
+              else if (type === "warning") severityClass = "issue-warning";
+
+              return `<div>
+                <span class="${severityClass}">Line ${issue.line} | ${type.toUpperCase() || 'INFO'} | ${issue.code || 'N/A'}</span><br>
+                Message: ${issue.message}<br>
+                Suggestion: ${issue.suggestion}
+              </div><br>`;
+            }).join("");
+
+            document.getElementById("output").innerHTML = outputHTML;
+          })
+          .catch(err => {
+            document.getElementById("output").innerText = "Error: " + (err.message || err);
+            document.getElementById("score").innerText = "";
+          });
+      };
+
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          const code = e.target.result;
+          analyze(code);
+        };
+        reader.readAsText(file);
+      } else {
+        const code = editor.getValue();
+        analyze(code);
+      }
+    }
+
+    document.getElementById("darkToggle").addEventListener("change", function () {
+      const darkMode = this.checked;
+      document.body.classList.toggle("dark-mode", darkMode);
+      monaco.editor.setTheme(darkMode ? "vs-dark" : "vs-light");
+    });
+  </script>
+</body>
+</html>
